@@ -11,7 +11,7 @@ fps= 30000/1001
 red_thres=[110,170]
 green_thres=[0,60]
 sat_thres=[80,240]
-FRAME_EXT='jpg'
+FRAME_EXT='png'
 
 
 # turn vid to frames
@@ -61,26 +61,37 @@ def find_marker(image, red_thres, green_thres, sat_thres):
     #return cv2.boundingRect(contours[1])
     return map(lambda x: cv2.boundingRect(x),contours)
 
-def process_img(img_path):
+def process_img(img_path,show):
 
     img = cv2.imread(img_path,cv2.IMREAD_COLOR)
 
     markers = find_marker(img,red_thres=red_thres,green_thres=green_thres, sat_thres=sat_thres)
     color = (255,0,0)
-    for marker in markers:
-        print marker
-        cv2.rectangle(img,(marker[0], marker[1]),(marker[0] + marker[2], marker[1] + marker[3]),color)
+    if show:
+        for marker in markers:
+            print marker
+            cv2.rectangle(img,(marker[0], marker[1]),(marker[0] + marker[2], marker[1] + marker[3]),color)
 
 
-    cv2.imshow('frame',img)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
+        cv2.imshow('frame',img)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
+    return len(markers)>0
 
 
 if __name__ == '__main__':
     folder = sys.argv[1]
     pics = os.listdir(folder) # also sort? 
-    for pic in pics:
+    d=5
+    s=len("image")
+    pics = sorted(pics,key=lambda x:int(x[s:s+d]))
+    show=False # show picture of detected thingey
+    detected_num = 0
+    for i,pic in enumerate(pics):
         if pic.endswith(FRAME_EXT):
             image_path = os.path.join(folder,pic)
-            process_img(image_path)
+            found = process_img(image_path,show)
+            if found:
+                detected_num+=1
+
+            print("found beanie in {} out of {} ({} %)\n".format(detected_num,i+1, 100.0*detected_num/(i+1)))

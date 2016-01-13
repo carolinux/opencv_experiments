@@ -1,6 +1,7 @@
 from datetime import datetime
 import math
 import os
+import subprocess
 import sys
 
 from matplotlib import pyplot as plt
@@ -8,19 +9,39 @@ import numpy as np
 import pandas as pd
 import cv2
 
-#ffprobe ./Test3_Tr1_Session5.MOV -v 0 -select_streams v   -print_format flat -show_entries stream=r_frame_rate
+# find frame rate 
+# ffprobe ./Test3_Tr1_Session5.MOV -v 0 -select_streams v   -print_format flat -show_entries stream=r_frame_rate
 # for tests on 10 Jan 2016
-fps= 30000/1001
+fps= 30
 red_thres=[110,170]
 green_thres=[0,60]
 sat_thres=[80,240]
+FRAME_BASE='image'
 FRAME_EXT='png'
+FRAME_DIGITS=5
 MAX_DIST=20 # max dist in pixels between two positions
 pixels_to_meters_ratio=(622-519)/3.0 # derived from a known distance in the exported video frame
 
 
 # turn vid to frames
 #ffmpeg -i ./Test3_Tr1_Session5.MOV -s hd720 -r 30 -f image2  Test3_Tr1_Session5/image%05d.jpg
+
+
+def vid_to_frames(vid_path, force_export=False):
+    base_folder = os.path.dirname(vid_path)
+    frame_dir, ext = os.path.splitext(vid_path)
+    if os.path.exists(frame_dir) and os.listdir(frame_dir) and not force_export:
+        print("Already have exported frames in {}".format(frame_dir))
+    else:
+        print("Exporting frames to {}".format(frame_dir))
+        if not os.path.exists(frame_dir):
+            os.mkdir(frame_dir)
+        fmt= os.path.join(frame_dir,"{}%0{}d.{}".format(FRAME_BASE, FRAME_DIGITS,FRAME_EXT))
+        call_args = ["ffmpeg", "-i", str(vid_path),"-s","hd720","-r",str(fps),"-f","image2",fmt]
+        print(" ".join(call_args))
+        subprocess.call(call_args)
+
+    return frame_dir
 
 
 def find_marker(image, red_thres, green_thres, sat_thres):
@@ -60,15 +81,26 @@ def dist(p1,p2):
     dy = p1[1]-p2[1]
     return math.sqrt(dx*dx + dy*dy)
 
-def process_img(img_path,show, prev_pos=None):
+def show_frame(frame, markers):
+    color = (255,0,0)
+    color2 = (255,255,255)
+    for marker in markers:
+        cv2.rectangle(frame,(marker[0], marker[1]),(marker[0] + marker[2], 
+            marker[1] + marker[3]),color2)
+    cv2.imshow('frame',frame)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+
+def process_frame(img_path,show, prev_pos=None):
 
     img = cv2.imread(img_path,cv2.IMREAD_COLOR)
 
     markers = find_marker(img,red_thres=red_thres,green_thres=green_thres, sat_thres=sat_thres)
     correct_marker = None
     if prev_pos is None:
+        show_frame(img, markers)
         if len(markers)!=1:
-            raise Exception("Can't find initial position of beanie")
+            raise Exception("Can't find initial position of beanie - ambiguous")
         curr_pos = center(markers[0])
         correct_marker = markers[0]
 
@@ -85,12 +117,13 @@ def process_img(img_path,show, prev_pos=None):
 
     color = (255,0,0)
     color2 = (255,255,255)
-    if show and correct_marker: #or (not show and len(markers)>1):
+    if show: #or (not show and len(markers)>1):
         for marker in markers:
             cv2.rectangle(img,(marker[0], marker[1]),(marker[0] + marker[2], 
                 marker[1] + marker[3]),color2)
-        cv2.rectangle(img,(correct_marker[0], correct_marker[1]),(correct_marker[0] + correct_marker[2], 
-            correct_marker[1] + correct_marker[3]),color)
+        if correct_marker:
+            cv2.rectangle(img,(correct_marker[0], correct_marker[1]),(correct_marker[0] + correct_marker[2], 
+                correct_marker[1] + correct_marker[3]),color)
         cv2.imshow('frame',img)
         cv2.waitKey(0)
         cv2.destroyAllWindows()
@@ -110,39 +143,73 @@ def get_speed_timeseries(df,groupby_secs, tracker_turn_on_delay_secs=3):
     ts = ts.resample(str(millis)+"L",how="max").fillna(method='backfill')
     ts_prev = ts.shift(1)
     speed = (ts - ts_prev) / groupby_secs *(1.0/pixels_to_meters_ratio)
+    speed = speed.fillna(0)
     # make it again to be a seconds offset
     speed.index = map(lambda x: (x.to_datetime() - datetime(1970,1,1,0,0)).total_seconds(), speed.index)
     return speed
 
 
-if __name__ == '__main__':
-    folder = sys.argv[1]
-    pics = os.listdir(folder) 
-    d=5
-    s=len("image")
-    pics = sorted(pics,key=lambda x:int(x[s:s+d]))
+def process_video(path, force=False):
+    frames_folder = vid_to_frames(path)
+    parent_folder = os.path.dirname(path)
+    basename,_ = os.path.splitext(os.path.basename(path))
+    out_speed_filename= os.path.join(parent_folder,basename+"_speed.csv")
+    out_speed_graph= os.path.join(parent_folder,basename+"_speed.png")
+    out_disp_graph= os.path.join(parent_folder,basename+"_disp.png")
+    if os.path.exists(out_speed_filename) and not force:
+        print("Video {} has already been processed. Output exists at {}".format(path,out_speed_filename))
+        return
+
+    frames = os.listdir(frames_folder) 
+    s=len(FRAME_BASE)
+    frames = sorted(frames,key=lambda x:int(x[s:s+FRAME_DIGITS]))
     show=False # show picture of detected thingey
     detected_num = 0
     prev_pos=None
     time_per_frame = 1.0/fps
-    time=0.0
     timeseries=[]
-    for i,pic in enumerate(pics):
-        if pic.endswith(FRAME_EXT):
-            image_path = os.path.join(folder,pic)
-            if i>0:
+    skip=300
+    for i,frame in enumerate(frames):
+        show=False
+        if i<skip:
+            continue
+        if frame.endswith(FRAME_EXT):
+            frame_path = os.path.join(frames_folder,frame)
+            if i>skip:
                 prev_pos = timeseries[-1]["pos"]
             else:
                 prev_pos = None
-            found,curr_pos = process_img(image_path,show,prev_pos = prev_pos)
+            found,curr_pos = process_frame(frame_path,show,prev_pos = prev_pos)
             if found:
                 detected_num+=1
                 timeseries.append({"time":i*time_per_frame, "pos":curr_pos})
-            print("found beanie in {} out of {} ({} %)\n".format(detected_num,i+1, 100.0*detected_num/(i+1)))
+            if i%100==0:
+                pct = 100.0*detected_num/(i+1-skip)
+                if pct<80:
+                    show=True
+                print("found beanie in {} out of {} ({} %)\n".format(detected_num,i+1-skip, pct))
+                print("Time duration: {} to {} seconds".format((i-100)*time_per_frame, i*time_per_frame))
         
 
     df = pd.DataFrame.from_records(timeseries)
     df["disp"] = df.pos.apply(lambda x:x[0])
+    plt.plot(df.time.values, df.disp.values)
+    plt.savefig(out_disp_graph)
     speed = get_speed_timeseries(df.copy(),0.5)
+    speed.to_csv(out_speed_filename)
     speed.plot()
-    plt.show()
+    plt.savefig(out_speed_graph)
+
+
+def process_all_videos(video_folder):
+    vids = os.listdir(video_folder)
+    for i,vid in enumerate(vids):
+        if not vid.endswith("MOV"):
+            continue
+        print("Processing video {}".format(vid))
+        process_video(os.path.join(video_folder,vid))
+        if i>=1:
+            return
+
+if __name__ == '__main__':
+    process_all_videos(sys.argv[1])

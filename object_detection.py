@@ -10,6 +10,8 @@ import numpy as np
 import pandas as pd
 import shutil
 
+from utils import Filenames as Fn
+
 # find frame rate 
 # ffprobe ./Test3_Tr1_Session5.MOV -v 0 -select_streams v   -print_format flat -show_entries stream=r_frame_rate
 # for tests on 10 Jan 2016
@@ -219,6 +221,9 @@ def process_video(path, force=False):
 
 def process_all_videos(video_folder):
     vids = os.listdir(video_folder)
+    date = Fn.extract_date_from_beginning(video_folder)
+    print date
+
     for i,vid in enumerate(vids):
         if not vid.endswith("MOV"):
             continue

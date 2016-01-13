@@ -1,8 +1,11 @@
+from datetime import datetime
 import math
 import os
 import sys
 
+from matplotlib import pyplot as plt
 import numpy as np
+import pandas as pd
 import cv2
 
 #ffprobe ./Test3_Tr1_Session5.MOV -v 0 -select_streams v   -print_format flat -show_entries stream=r_frame_rate
@@ -13,7 +16,7 @@ green_thres=[0,60]
 sat_thres=[80,240]
 FRAME_EXT='png'
 MAX_DIST=20 # max dist in pixels between two positions
-pixel_to_meters_ratio=100/3.0
+pixels_to_meters_ratio=(622-519)/3.0 # derived from a known distance in the exported video frame
 
 
 # turn vid to frames
@@ -82,7 +85,7 @@ def process_img(img_path,show, prev_pos=None):
 
     color = (255,0,0)
     color2 = (255,255,255)
-    if show and correct_marker or (not show and len(markers)>1):
+    if show and correct_marker: #or (not show and len(markers)>1):
         for marker in markers:
             cv2.rectangle(img,(marker[0], marker[1]),(marker[0] + marker[2], 
                 marker[1] + marker[3]),color2)
@@ -94,20 +97,52 @@ def process_img(img_path,show, prev_pos=None):
     return correct_marker is not None,curr_pos
 
 
+def get_speed_timeseries(df,groupby_secs, tracker_turn_on_delay_secs=3):
+
+    # discard data before tracker was turned on
+    df.time = df.time - tracker_turn_on_delay_secs
+    df = df[df.time>=0]
+    # turn into a time series to resample easily
+    ts = pd.Series(df.disp.values, df.time)
+    ts.index = (ts.index*1e9).to_datetime()
+    millis = int(1e3 * groupby_secs)
+    # resample & find speed for given groupby_secs interval
+    ts = ts.resample(str(millis)+"L",how="max").fillna(method='backfill')
+    ts_prev = ts.shift(1)
+    speed = (ts - ts_prev) / groupby_secs *(1.0/pixels_to_meters_ratio)
+    # make it again to be a seconds offset
+    speed.index = map(lambda x: (x.to_datetime() - datetime(1970,1,1,0,0)).total_seconds(), speed.index)
+    return speed
+
+
 if __name__ == '__main__':
     folder = sys.argv[1]
-    pics = os.listdir(folder) # also sort? 
+    pics = os.listdir(folder) 
     d=5
     s=len("image")
     pics = sorted(pics,key=lambda x:int(x[s:s+d]))
     show=False # show picture of detected thingey
     detected_num = 0
     prev_pos=None
+    time_per_frame = 1.0/fps
+    time=0.0
+    timeseries=[]
     for i,pic in enumerate(pics):
         if pic.endswith(FRAME_EXT):
             image_path = os.path.join(folder,pic)
-            found,prev_pos = process_img(image_path,show,prev_pos)
+            if i>0:
+                prev_pos = timeseries[-1]["pos"]
+            else:
+                prev_pos = None
+            found,curr_pos = process_img(image_path,show,prev_pos = prev_pos)
             if found:
                 detected_num+=1
-
+                timeseries.append({"time":i*time_per_frame, "pos":curr_pos})
             print("found beanie in {} out of {} ({} %)\n".format(detected_num,i+1, 100.0*detected_num/(i+1)))
+        
+
+    df = pd.DataFrame.from_records(timeseries)
+    df["disp"] = df.pos.apply(lambda x:x[0])
+    speed = get_speed_timeseries(df.copy(),0.5)
+    speed.plot()
+    plt.show()

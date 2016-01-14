@@ -93,6 +93,8 @@ class Filenames(object):
     @staticmethod
     def change_ext(filename, new_ext):
         base, ext = os.path.splitext(filename)
+        if not new_ext.startswith("."):
+            new_ext="."+new_ext
         return base + new_ext
 
 

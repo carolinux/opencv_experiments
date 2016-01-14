@@ -12,7 +12,7 @@ def read_meta_file(fn):
     meta={}
     with open(fn,'r') as f:
         first=True
-        for line in f:
+        for i,line in enumerate(f):
             line = line.strip()
             if first:
                 first=False
@@ -29,7 +29,7 @@ def read_meta_file(fn):
                 try:
                     secs_elapsed = float(vals[0])
                 except:
-                    print("Could not cast {} to float.".format(vals[0]))
+                    #print("Could not cast {} to float.".format(vals[0]))
                     secs_elapsed = 0
                 location = vals[1].strip()
                 rec={"secs_from_prev_to_curr":secs_elapsed,"corner":location}
@@ -41,14 +41,18 @@ def read_meta_file(fn):
 def get_meta(meta, keys,func):
     for k in keys:
         if k in meta:
-            return func(meta[k])
+            try:
+                return func(meta[k])
+            except:
+                if "m" == meta[k][-1]:
+                    return func(meta[k][:-1])
 
 def get_pitch_length(meta):
-    keys=["length","legnth","lenght"]
+    keys=["length","legnth","lenght","l"]
     return get_meta(meta,keys,float)
     
 def get_pitch_width(meta):
-    keys=["width","widht","widt"]
+    keys=["width","widht","widt","w"]
     return get_meta(meta,keys,float)
 
 def get_distance(x,distances):
@@ -69,8 +73,14 @@ def get_corner_to_dist_mapping(w,l,date):
 
 def process_file(fn, date):
     df, meta = read_meta_file(fn)
+    if len(df)<=1:
+        #print("Not a distance related ground truth file, skipping")
+        return
     w = get_pitch_width(meta)
     l = get_pitch_length(meta)
+    if w is None or l is None:
+        print("No width or length information, skipping {}".format(fn))
+        return
     diag = math.sqrt(l*l + w*w)
     distances=get_corner_to_dist_mapping(w,l,date)
     dfprev = df.shift(1)
@@ -78,11 +88,14 @@ def process_file(fn, date):
     df["dist_from_prev_to_curr"] = df.route.apply(lambda x: get_distance(x,distances))
     df["dist_covered"] = df["dist_from_prev_to_curr"].cumsum()
     df["secs_elapsed"] = df["secs_from_prev_to_curr"].cumsum()
-    import ipdb; ipdb.set_trace()
+    df2 = df[["secs_elapsed","dist_covered"]]
+    ts = pd.Series(df.dist_covered.values, index=df.secs_elapsed)
+    ts.to_csv(Fn.change_ext(fn,"dground"))
 
 def process_all_ground_truth(folder,date):
     all_meta_files = Fn.find_files_with_ext(folder,"meta")
     for fn in all_meta_files:
+        #print(fn)
         process_file(fn,date)
 
 if __name__ == '__main__':

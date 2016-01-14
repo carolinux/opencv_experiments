@@ -14,6 +14,7 @@ from utils import Filenames as Fn
 
 # find frame rate 
 # ffprobe ./Test3_Tr1_Session5.MOV -v 0 -select_streams v   -print_format flat -show_entries stream=r_frame_rate
+GROUPBY_SECONDS=0.5
 FRAME_BASE='image'
 FRAME_EXT='png'
 FRAME_DIGITS=5
@@ -188,6 +189,7 @@ def process_video(path, date,force=False):
     else:
         shutil.rmtree(debug_folder,ignore_errors=True)
         os.mkdir(debug_folder)
+    # TODO: Use vground output format
     out_speed_filename= os.path.join(parent_folder,basename+"_speed.csv")
     out_speed_graph= os.path.join(parent_folder,basename+"_speed.png")
     out_disp_graph= os.path.join(parent_folder,basename+"_disp.png")
@@ -242,7 +244,7 @@ def process_video(path, date,force=False):
     plt.plot(df.time.values, df.disp.values)
     plt.savefig(out_disp_graph)
     plt.clf()
-    speed = get_speed_timeseries(df.copy(),0.5)
+    speed = get_speed_timeseries(df.copy(),GROUPBY_SECONDS,date)
     speed.to_csv(out_speed_filename)
     speed.plot()
     plt.savefig(out_speed_graph)

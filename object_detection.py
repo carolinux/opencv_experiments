@@ -14,24 +14,30 @@ from utils import Filenames as Fn
 
 # find frame rate 
 # ffprobe ./Test3_Tr1_Session5.MOV -v 0 -select_streams v   -print_format flat -show_entries stream=r_frame_rate
-# for tests on 10 Jan 2016
-fps= 30
-red_thres=[110,170]
-green_thres=[0,60]
-sat_thres=[80,240]
 FRAME_BASE='image'
 FRAME_EXT='png'
 FRAME_DIGITS=5
-MAX_DIST=30 # max dist in pixels between two positions
-pixels_to_meters_ratio=(622-519)/3.0 # derived from a known distance in the exported video frame
+JAN10=datetime(2016,1,10).date()
+# for tests on 10 Jan 2016
+config = {
+        JAN10: {
+            "fps": 30,
+            "red_thres":[110,170],
+            "green_thres":[0,60],
+            "sat_thres":[80,240],
+            "max_dist":30, # max dist in pixels between two positions
+            "pixels_to_meters_ratio":(622-519)/3.0,# derived from a known distance in the exported video frame
+}
+}
 
 
 # turn vid to frames
 #ffmpeg -i ./Test3_Tr1_Session5.MOV -s hd720 -r 30 -f image2  Test3_Tr1_Session5/image%05d.jpg
 
 
-def vid_to_frames(vid_path, force_export=False):
+def vid_to_frames(vid_path, date, force_export=False):
     base_folder = os.path.dirname(vid_path)
+    fps = config[date]["fps"]
     frame_dir, ext = os.path.splitext(vid_path)
     if os.path.exists(frame_dir) and os.listdir(frame_dir) and not force_export:
         print("Already have exported frames in {}".format(frame_dir))
@@ -97,13 +103,18 @@ def show_frame(frame, markers):
 def process_frame(img_path,date,show, prev_pos=None):
 
     img = cv2.imread(img_path,cv2.IMREAD_COLOR)
+    red_thres = config[date]["red_thres"]
+    green_thres = config[date]["green_thres"]
+    sat_thres = config[date]["sat_thres"]
+    max_dist = config[date]["max_dist"]
 
     markers = find_marker(img,red_thres=red_thres,green_thres=green_thres, sat_thres=sat_thres)
     correct_marker = None
     if prev_pos is None:
         if len(markers)!=1:
-            if date==datetime(2016, 1, 10).date():
+            if date==JAN10:
                 # will find rightmost beanie, ie the one with biggest X
+                # because of the known way people were standing
                 print("Ambiguous first frame, getting rightmost marker")
                 markers = sorted(markers,key=lambda x: x[0])
                 #import ipdb; ipdb.set_trace()
@@ -122,7 +133,7 @@ def process_frame(img_path,date,show, prev_pos=None):
         currd=1000
         for marker in markers:
             d=dist(center(marker),prev_pos)
-            if d<MAX_DIST and d<currd:
+            if d<max_dist and d<currd:
                 curr_pos = center(marker)
                 currd=d
                 correct_marker = marker
@@ -147,7 +158,7 @@ def process_frame(img_path,date,show, prev_pos=None):
     return correct_marker is not None,curr_pos,img
 
 
-def get_speed_timeseries(df,groupby_secs, tracker_turn_on_delay_secs=3):
+def get_speed_timeseries(df,groupby_secs,date, tracker_turn_on_delay_secs=3):
 
     # discard data before tracker was turned on
     df.time = df.time - tracker_turn_on_delay_secs
@@ -159,6 +170,7 @@ def get_speed_timeseries(df,groupby_secs, tracker_turn_on_delay_secs=3):
     # resample & find speed for given groupby_secs interval
     ts = ts.resample(str(millis)+"L",how="max").fillna(method='backfill')
     ts_prev = ts.shift(1)
+    pixels_to_meters_ratio = config[date]["pixels_to_meters_ratio"]
     speed = (ts - ts_prev) / groupby_secs *(1.0/pixels_to_meters_ratio)
     speed = speed.fillna(0)
     # make it again to be a seconds offset
@@ -167,7 +179,7 @@ def get_speed_timeseries(df,groupby_secs, tracker_turn_on_delay_secs=3):
 
 
 def process_video(path, date,force=False):
-    frames_folder = vid_to_frames(path)
+    frames_folder = vid_to_frames(path,date)
     parent_folder = os.path.dirname(path)
     basename,_ = os.path.splitext(os.path.basename(path))
     debug_folder = frames_folder+"_debug"
@@ -189,6 +201,7 @@ def process_video(path, date,force=False):
     show=False # show picture of detected thingey
     detected_num = 0
     prev_pos=None
+    fps = config[date]["fps"]
     time_per_frame = 1.0/fps
     timeseries=[]
     skip=0

@@ -121,6 +121,10 @@ class Filenames(object):
 
 
     @staticmethod
+    def find_files_with_ext(parent_folder, ext):
+        return glob(os.path.join(parent_folder,"*"+ext))
+
+    @staticmethod
     def extract_date_from_beginning(fn,default=None):
         timelen=4 + 2 +2
         basename = os.path.basename(fn.rstrip(os.path.sep))

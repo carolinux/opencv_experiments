@@ -22,7 +22,7 @@ sat_thres=[80,240]
 FRAME_BASE='image'
 FRAME_EXT='png'
 FRAME_DIGITS=5
-MAX_DIST=50 # max dist in pixels between two positions
+MAX_DIST=30 # max dist in pixels between two positions
 pixels_to_meters_ratio=(622-519)/3.0 # derived from a known distance in the exported video frame
 
 
@@ -94,7 +94,7 @@ def show_frame(frame, markers):
     cv2.waitKey(0)
     cv2.destroyAllWindows()
 
-def process_frame(img_path,show, prev_pos=None):
+def process_frame(img_path,date,show, prev_pos=None):
 
     img = cv2.imread(img_path,cv2.IMREAD_COLOR)
 
@@ -102,10 +102,20 @@ def process_frame(img_path,show, prev_pos=None):
     correct_marker = None
     if prev_pos is None:
         if len(markers)!=1:
-            show_frame(img, markers)
-            raise Exception("Can't find initial position of beanie - ambiguous")
-        curr_pos = center(markers[0])
-        correct_marker = markers[0]
+            if date==datetime(2016, 1, 10).date():
+                # will find rightmost beanie, ie the one with biggest X
+                print("Ambiguous first frame, getting rightmost marker")
+                markers = sorted(markers,key=lambda x: x[0])
+                #import ipdb; ipdb.set_trace()
+                correct_marker = markers[-1]
+                curr_pos = center(correct_marker)
+            else:
+                show_frame(img, markers)
+                raise Exception("Can't find initial position of beanie - ambiguous, and I have no logic for date {} to distinguish".format(date))
+            
+        else:
+            curr_pos = center(markers[0])
+            correct_marker = markers[0]
 
     else:
         found = False
@@ -156,7 +166,7 @@ def get_speed_timeseries(df,groupby_secs, tracker_turn_on_delay_secs=3):
     return speed
 
 
-def process_video(path, force=False):
+def process_video(path, date,force=False):
     frames_folder = vid_to_frames(path)
     parent_folder = os.path.dirname(path)
     basename,_ = os.path.splitext(os.path.basename(path))
@@ -181,35 +191,41 @@ def process_video(path, force=False):
     prev_pos=None
     time_per_frame = 1.0/fps
     timeseries=[]
-    skip=400
-    write_every=15
+    skip=0
+    write_every=10
+    found_first=False
     for i,frame in enumerate(frames):
         show=False
-        if i<skip:
-            continue
         if frame.endswith(FRAME_EXT):
             frame_path = os.path.join(frames_folder,frame)
             if i>skip:
                 prev_pos = timeseries[-1]["pos"]
             else:
                 prev_pos = None
-            found,curr_pos,modified_frame = process_frame(frame_path,show,prev_pos = prev_pos)
+            found,curr_pos,modified_frame = process_frame(frame_path,date,show,prev_pos = prev_pos)
+            if not found and not found_first:
+                skip+=1
+                continue
+            if found and not found_first:
+                found_first=True
             if i%write_every==0 or i==skip:
                 outfile = os.path.join(debug_folder,"frame{}.png".format(i))
+                h, w, _ = modified_frame.shape
+                font = cv2.FONT_HERSHEY_SIMPLEX
+                modified_frame = cv2.putText(modified_frame,"Secs:{}".format(i*time_per_frame),(10,100), font, 1,(255,255,255),2)
                 cv2.imwrite(outfile, modified_frame)
             if found:
                 detected_num+=1
                 timeseries.append({"time":i*time_per_frame, "pos":curr_pos})
             if i%100==0:
                 pct = 100.0*detected_num/(i+1-skip)
-                #if pct<80:
-                    #show=True
                 print("found beanie in {} out of {} ({} %)\n".format(detected_num,i+1-skip, pct))
                 print("Time duration: {} to {} seconds".format((i-100)*time_per_frame, i*time_per_frame))
         
 
     df = pd.DataFrame.from_records(timeseries)
     df["disp"] = df.pos.apply(lambda x:x[0])
+    plt.clf()
     plt.plot(df.time.values, df.disp.values)
     plt.savefig(out_disp_graph)
     plt.clf()
@@ -228,7 +244,7 @@ def process_all_videos(video_folder):
         if not vid.endswith("MOV"):
             continue
         print("Processing video {}".format(vid))
-        process_video(os.path.join(video_folder,vid))
+        process_video(os.path.join(video_folder,vid),date)
         if i>=2:
             return
 

@@ -123,7 +123,7 @@ class Filenames(object):
     @staticmethod
     def extract_date_from_beginning(fn,default=None):
         timelen=4 + 2 +2
-        basename = os.path.basename(fn)
+        basename = os.path.basename(fn.rstrip(os.path.sep))
         try:
             return datetime.strptime(basename[:timelen],"%Y%m%d").date()
         except: 
